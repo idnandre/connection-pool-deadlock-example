@@ -1,0 +1,22 @@
+version: "3.7"
+
+services:
+  golang:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    container_name: connection-pool-deadlock-example
+    restart: always
+    ports:
+      - 4000:4000
+  mysql:
+    image: mysql:latest
+    ports:
+      - 3306:3306
+    volumes:
+      - mysql-data:/var/lib/mysql
+    environment: 
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: test
+volumes:
+  mysql-data:
