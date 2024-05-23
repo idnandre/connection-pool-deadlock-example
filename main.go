@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -15,11 +16,15 @@ var (
 )
 
 type User struct {
-	ID          int    `json:"-"`
-	Name        string `json:"name"`
-	UserName    string `json:"username"`
-	Bio         string `json:"bio"`
-	IsAvailable bool   `json:"is_available"`
+	ID       int    `json:"-"`
+	Name     string `json:"name"`
+	UserName string `json:"username"`
+	Bio      string `json:"bio"`
+}
+
+type Follow struct {
+	SourceID int
+	TargetID int
 }
 
 type Response struct {
@@ -32,8 +37,8 @@ func main() {
 	sqlDB = OpenDBConnection()
 	router := http.NewServeMux()
 
-	router.HandleFunc("GET /list", Handler)
-	router.HandleFunc("GET /list-fix", HandlerFix)
+	router.HandleFunc("GET /list-following", Handler)
+	router.HandleFunc("GET /list-following-fix", HandlerFix)
 
 	http.ListenAndServe(":4000", router)
 }
@@ -56,7 +61,9 @@ func OpenDBConnection() *sql.DB {
 }
 
 func Handler(w http.ResponseWriter, r *http.Request) {
-	users, err := GetListUsers(r.Context())
+	userID, _ := strconv.Atoi(r.Header.Get("x-user-id"))
+
+	users, err := GetListFollows(r.Context(), userID)
 	if err != nil {
 		resp := &Response{
 			Status:  http.StatusInternalServerError,
@@ -79,7 +86,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func HandlerFix(w http.ResponseWriter, r *http.Request) {
-	users, err := GetListUsersFix(r.Context())
+	userID, _ := strconv.Atoi(r.Header.Get("x-user-id"))
+
+	follows, err := GetListFollowsFix(r.Context(), userID)
 	if err != nil {
 		resp := &Response{
 			Status:  http.StatusInternalServerError,
@@ -91,8 +100,10 @@ func HandlerFix(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, user := range users {
-		isAvailable, err := GetIsUsersAvailable(r.Context(), user.ID)
+	users := []*User{}
+
+	for _, follow := range follows {
+		user, err := GetUserDetail(r.Context(), follow.TargetID)
 		if err != nil {
 			resp := &Response{
 				Status:  http.StatusInternalServerError,
@@ -103,7 +114,8 @@ func HandlerFix(w http.ResponseWriter, r *http.Request) {
 			w.Write(bytes)
 			return
 		}
-		user.IsAvailable = isAvailable
+
+		users = append(users, user)
 	}
 
 	resp := &Response{
@@ -116,10 +128,10 @@ func HandlerFix(w http.ResponseWriter, r *http.Request) {
 	w.Write(bytes)
 }
 
-func GetListUsers(ctx context.Context) ([]*User, error) {
+func GetListFollows(ctx context.Context, id int) ([]*User, error) {
 	users := []*User{}
-	query := "SELECT id, name, username, bio FROM users"
-	rows, err := sqlDB.QueryContext(ctx, query)
+	query := "SELECT source_id, target_id FROM follows where source_id = ?"
+	rows, err := sqlDB.QueryContext(ctx, query, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -129,16 +141,15 @@ func GetListUsers(ctx context.Context) ([]*User, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		user := &User{}
-		if err := rows.Scan(&user.ID, &user.Name, &user.UserName, &user.Bio); err != nil {
+		follow := &Follow{}
+		if err := rows.Scan(&follow.SourceID, &follow.TargetID); err != nil {
 			return nil, err
 		}
 
-		isAvailable, err := GetIsUsersAvailable(ctx, user.ID)
+		user, err := GetUserDetail(ctx, follow.TargetID)
 		if err != nil {
 			return nil, err
 		}
-		user.IsAvailable = isAvailable
 
 		users = append(users, user)
 	}
@@ -146,10 +157,10 @@ func GetListUsers(ctx context.Context) ([]*User, error) {
 	return users, nil
 }
 
-func GetListUsersFix(ctx context.Context) ([]*User, error) {
-	users := []*User{}
-	query := "SELECT id, name, username, bio FROM users"
-	rows, err := sqlDB.QueryContext(ctx, query)
+func GetListFollowsFix(ctx context.Context, id int) ([]*Follow, error) {
+	follows := []*Follow{}
+	query := "SELECT source_id, target_id FROM follows where source_id = ?"
+	rows, err := sqlDB.QueryContext(ctx, query, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -159,28 +170,28 @@ func GetListUsersFix(ctx context.Context) ([]*User, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		user := &User{}
-		if err := rows.Scan(&user.ID, &user.Name, &user.UserName, &user.Bio); err != nil {
+		follow := &Follow{}
+		if err := rows.Scan(&follow.SourceID, &follow.TargetID); err != nil {
 			return nil, err
 		}
 
-		users = append(users, user)
+		follows = append(follows, follow)
 	}
 
-	return users, nil
+	return follows, nil
 }
 
-func GetIsUsersAvailable(ctx context.Context, id int) (bool, error) {
-	idUser := 0
-	query := "SELECT user_id FROM availables WHERE user_id = ?"
+func GetUserDetail(ctx context.Context, id int) (*User, error) {
+	user := &User{}
+	query := "SELECT id, name, username, bio FROM users WHERE id = ?"
 	row := sqlDB.QueryRowContext(ctx, query, id)
-	err := row.Scan(&idUser)
+	err := row.Scan(&user.ID, &user.Name, &user.UserName, &user.Bio)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return false, nil
+			return nil, nil
 		}
-		return false, err
+		return nil, err
 	}
 
-	return true, nil
+	return user, nil
 }
