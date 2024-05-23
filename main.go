@@ -45,7 +45,7 @@ func main() {
 
 func OpenDBConnection() *sql.DB {
 	host := "mysql"
-	port := "3306"
+	port := "3307"
 	user := "root"
 	password := "root"
 	database := "test"
